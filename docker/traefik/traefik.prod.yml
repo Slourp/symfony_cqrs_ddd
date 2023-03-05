@@ -1,0 +1,33 @@
+api:
+  dashboard: true
+  insecure: true
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+providers:
+# Prod & Dev server's configuration
+  docker:
+    watch: true
+    exposedByDefault: false
+    # /!\ Has to match network's name in docker-compose /!\
+    network: web
+certificatesResolvers:
+  default:
+    acme:
+      email: admintech@pop-france.eu
+      storage: acme.json
+      # Production :  
+      caServer: "https://acme-v02.api.letsencrypt.org/directory"
+      # Dev ( On a server ) :
+      # caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
+      tlsChallenge: {}
