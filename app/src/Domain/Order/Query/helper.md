@@ -147,3 +147,191 @@ class UserWeightQuery
 }
 
 ```
+
+# Cas pratique
+
+```
+Supposons que nous avons une entité de domaine Order qui peut être créée, mise à jour et annulée. Lorsqu'un utilisateur crée une nouvelle commande, une Command CreateOrderCommand est créée et envoyée à un Command Handler. Le Command Handler utilise un Repository pour enregistrer la nouvelle commande sous forme d'un événement OrderCreatedEvent.
+
+Lorsqu'un utilisateur souhaite consulter l'historique des commandes, une Query GetOrdersQuery est créée et envoyée à un Query Handler. Le Query Handler utilise un Repository pour récupérer les événements OrderCreatedEvent, OrderUpdatedEvent et OrderCancelledEvent correspondant à l'historique des commandes, en les filtrant en fonction de la date de création, de la date de mise à jour ou de la date d'annulation de la commande.
+
+Voici un exemple de Command, Command Handler et Repository pour la création d'une commande :
+```
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Order\Command;
+
+class CreateOrderCommand
+{
+    private string $orderId;
+
+    private string $customerId;
+
+    private array $items;
+
+    public function __construct(string $orderId, string $customerId, array $items)
+    {
+        $this->orderId = $orderId;
+        $this->customerId = $customerId;
+        $this->items = $items;
+    }
+
+    public function getOrderId(): string
+    {
+        return $this->orderId;
+    }
+
+    public function getCustomerId(): string
+    {
+        return $this->customerId;
+    }
+
+    public function getItems(): array
+    {
+        return $this->items;
+    }
+}
+
+```
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Application\Order\Command;
+
+use App\Domain\Order\Command\CreateOrderCommand;
+use App\Domain\Order\Event\OrderCreatedEvent;
+use App\Domain\Order\Model\OrderRepository;
+
+class CreateOrderCommandHandler
+{
+    private OrderRepository $orderRepository;
+
+    public function __construct(OrderRepository $orderRepository)
+    {
+        $this->orderRepository = $orderRepository;
+    }
+
+    public function __invoke(CreateOrderCommand $command): void
+    {
+        $order = new Order($command->getOrderId(), $command->getCustomerId(), $command->getItems());
+
+        $orderCreatedEvent = new OrderCreatedEvent(
+            $command->getOrderId(),
+            $command->getCustomerId(),
+            $command->getItems()
+        );
+
+        $this->orderRepository->store($orderCreatedEvent);
+    }
+}
+
+```
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Order\Model;
+
+use App\Domain\Order\Event\OrderCreatedEvent;
+use App\Infrastructure\EventStore\EventStoreInterface;
+
+class OrderRepository
+{
+    private EventStoreInterface $eventStore;
+
+    public function __construct(EventStoreInterface $eventStore)
+    {
+        $this->eventStore = $eventStore;
+    }
+
+    public function store(OrderCreatedEvent $event): void
+    {
+        $this->eventStore->storeEvent($event);
+    }
+}
+
+```
+
+Dans cet exemple, le Command CreateOrderCommand contient l'identifiant de commande, l'identifiant du client et la liste des articles de la commande. Le Command Handler CreateOrderCommandHandler crée une nouvelle entité Order à partir des informations du Command, crée un nouvel événement OrderCreatedEvent correspondant, puis enregistre l'événement en utilisant le Repository OrderRepository.
+
+Notez que le Repository utilise l'interface EventStoreInterface pour stocker et récupérer des événements
+
+## Code client 
+
+### Pour enrengistrer une commande
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Application\Order\Controller;
+
+use App\Application\Order\Command\CreateOrderCommand;
+use App\Application\Order\Command\CreateOrderCommandHandler;
+use App\Domain\Order\Model\OrderRepository;
+use App\Infrastructure\EventStore\EventStore;
+
+class OrderController
+{
+    private CreateOrderCommandHandler $createOrderCommandHandler;
+
+    public function __construct(OrderRepository $orderRepository)
+    {
+        $eventStore = new EventStore();
+        $this->createOrderCommandHandler = new CreateOrderCommandHandler($orderRepository);
+    }
+
+    public function createOrder(string $orderId, string $customerId, array $items): void
+    {
+        $command = new CreateOrderCommand($orderId, $customerId, $items);
+
+        $this->createOrderCommandHandler->__invoke($command);
+    }
+}
+```
+
+
+### Pour récupérer une commande 
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Application\Order\Controller;
+
+use App\Application\Order\Query\GetOrdersQuery;
+use App\Application\Order\Query\GetOrdersQueryHandler;
+use App\Domain\Order\Model\Order;
+use App\Domain\Order\Model\OrderRepository;
+use App\Infrastructure\EventStore\EventStore;
+
+class OrderController
+{
+    private GetOrdersQueryHandler $getOrdersQueryHandler;
+
+    public function __construct(OrderRepository $orderRepository)
+    {
+        $eventStore = new EventStore();
+        $this->getOrdersQueryHandler = new GetOrdersQueryHandler($orderRepository);
+    }
+
+    public function getOrders(string $customerId): array
+    {
+        $query = new GetOrdersQuery($customerId);
+
+        $orders = $this->getOrdersQueryHandler->__invoke($query);
+
+        return array_map(fn (Order $order) => $order->toArray(), $orders);
+    }
+}
+
+```
